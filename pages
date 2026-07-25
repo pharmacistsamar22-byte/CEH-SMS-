@@ -1,1 +1,696 @@
 
+# -*- coding: utf-8 -*-
+"""صفحة: بيانات الحالة (تسجيل حالة جديدة)"""
+
+from datetime import datetime
+
+import pandas as pd
+import streamlit as st
+
+from common import (
+    DECON_TEXT, HAZMAT_TEXT, LOCATION_TEXT, NO_MATERIAL_LABEL,
+    OTHER_MATERIAL_LABEL, ROUTE_T# -*- coding: utf-8 -*-
+"""صفحة: لوحة التحكم (owner فقط)"""
+# -*- coding: utf-8 -*-
+"""صفحة: لدغات الأفاعي والعقارب — بروتوكولات الإسعاف والعلاج"""
+
+import pandas as pd# -*- coding: utf-8 -*-
+"""صفحة: قاعدة بيانات SDS"""
+
+import streamlit as st
+
+from common import (
+    TOX_MAIN_TEXT, TOX_SUB_OPTIONS, inject_css, load_sds_database_cached,
+    require_login, show_logo, sidebar_user_box, storage_backend, update_material_approval,
+)
+
+st.set_page_config(page_title="قاعدة بيانات SDS — CEHSMS", page_icon="🧪", layout="wide")
+inject_css()
+require_login()
+sidebar_user_box()
+
+show_logo(width=80)
+st.header("🧪 قاعدة بيانات SDS")
+
+if storage_backend() == "local":
+    st.caption("💾 وضع التخزين الحالي: محلي (غير دائم على الاستضافة السحابية) — راجع إعدادات Google Sheets في README.")
+
+is_owner = st.session_state.get("is_owner", False)
+sds_db = load_sds_database_cached()
+
+# --------------------------------------------------------------------------
+# قائمة المواد بانتظار الاعتماد (مالك النظام فقط)
+# --------------------------------------------------------------------------
+pending = [m for m in sds_db if m.get("pendingApproval")]
+if is_owner and pending:
+    st.warning(f"⚠ يوجد {len(pending)} مادة بانتظار الاعتماد")
+    with st.expander(f"📋 مراجعة المواد بانتظار الاعتماد ({len(pending)})", expanded=True):
+        for item in list(pending):
+            with st.container(border=True):
+                st.markdown(f"**{item['name']}** ({item.get('trade','-')})")
+                st.caption(f"أُضيفت بواسطة: {item.get('addedBy','-')} في {item.get('addedAt','-')}")
+                st.write(f"الإسعافات الأولية: {item.get('firstAid','-')}")
+                if item.get("sdsFileB64"):
+                    import base64
+                    st.download_button(
+                        f"📎 معاينة ملف SDS المرفق ({item.get('sdsFileName','sds.pdf')})",
+                        data=base64.b64decode(item["sdsFileB64"]),
+                        file_name=item.get("sdsFileName", "sds.pdf"),
+                        mime="application/pdf",
+                        key=f"preview_{item['name']}_{item.get('addedAt','')}",
+                    )
+                bc1, bc2 = st.columns(2)
+                with bc1:
+                    if st.button("✅ اعتماد", key=f"approve_{item['name']}"):
+                        update_material_approval(item["name"], item.get("addedAt"), approve=True)
+                        st.rerun()
+                with bc2:
+                    if st.button("🗑 رفض وحذف", key=f"reject_{item['name']}"):
+                        update_material_approval(item["name"], item.get("addedAt"), approve=False)
+                        st.rerun()
+
+st.divider()
+
+# --------------------------------------------------------------------------
+# البحث والتصفية
+# --------------------------------------------------------------------------
+c1, c2, c3 = st.columns(3)
+with c1:
+    search = st.text_input("ابحث باسم المادة (مثال: كلور، ايثانول، ميثانول...)")
+with c2:
+    tox_filter_main = st.selectbox(
+        "تصفية حسب الفئة الرئيسية", ["الكل"] + list(TOX_MAIN_TEXT.keys()),
+        format_func=lambda k: "الكل" if k == "الكل" else TOX_MAIN_TEXT[k],
+    )
+with c3:
+    sub_options = ["الكل"] + (TOX_SUB_OPTIONS.get(tox_filter_main, []) if tox_filter_main != "الكل" else [])
+    tox_filter_sub = st.selectbox("تصفية حسب الفئة الفرعية", sub_options)
+
+filtered = sds_db
+if search.strip():
+    s = search.strip()
+    filtered = [
+        m for m in filtered
+        if s in m["name"] or s in m.get("trade", "") or s in m.get("cas", "")
+    ]
+if tox_filter_main != "الكل":
+    filtered = [m for m in filtered if m.get("toxClassMain") == tox_filter_main]
+if tox_filter_sub != "الكل":
+    filtered = [m for m in filtered if m.get("toxClassSub") == tox_filter_sub]
+
+st.caption(f"عدد المواد: {len(filtered)} من إجمالي {len(sds_db)}")
+
+names = [m["name"] for m in filtered]
+if not names:
+    st.warning("لا توجد نتائج مطابقة.")
+    st.stop()
+
+chosen = st.selectbox("اختر مادة لعرض التفاصيل", names)
+item = next(m for m in filtered if m["name"] == chosen)
+
+if item.get("pendingApproval"):
+    st.markdown('<span class="pending-tag">⏳ بانتظار اعتماد المسؤول</span>', unsafe_allow_html=True)
+if item.get("skinDeconMandatory"):
+    st.markdown('<div class="decon-tag">🛑 إزالة تلوث إلزامية</div>', unsafe_allow_html=True)
+
+st.subheader(item["name"])
+st.caption(f"{item.get('trade','')} — CAS: {item.get('cas','')}")
+st.write(
+    f"**التصنيف السمي:** {TOX_MAIN_TEXT.get(item.get('toxClassMain',''), '-')} "
+    f"— {item.get('toxClassSub','-')}"
+)
+
+c1, c2, c3 = st.columns(3)
+c1.metric("NFPA — الصحة", item["nfpa"]["h"])
+c2.metric("NFPA — الاشتعال", item["nfpa"]["f"])
+c3.metric("NFPA — التفاعلية", item["nfpa"]["r"])
+
+st.write(f"**الحالة الفيزيائية:** {item.get('state','-')}")
+st.write(f"**الاستخدامات:** {item.get('uses','-')}")
+st.write(f"**التخزين:** {item.get('storage','-')}")
+st.write(f"**التسرب/الانسكاب:** {item.get('spill','-')}")
+st.write(f"**التأثير على الصحة:** {item.get('health','-')}")
+
+if item.get("skinDeconMandatory"):
+    st.markdown(
+        '<div class="decon-alert">🛑 إزالة التلوث إلزامية: طريقة وصول المادة '
+        'عن طريق الجلد — يجب غسل جيد بالماء وخلع الملابس الملوثة فورًا</div>',
+        unsafe_allow_html=True,
+    )
+
+st.write(f"**الإسعافات الأولية:** {item.get('firstAid','-')}")
+st.write(f"**مهمات الوقاية:** {item.get('ppe','-')}")
+
+# ملف SDS المرفق — يظهر لكل المستخدمين بعد اعتماد المالك فقط
+if item.get("sdsFileB64"):
+    if not item.get("pendingApproval") or is_owner:
+        import base64
+        st.download_button(
+            f"📎 تحميل ملف SDS المرفق ({item.get('sdsFileName','sds.pdf')})",
+            data=base64.b64decode(item["sdsFileB64"]),
+            file_name=item.get("sdsFileName", "sds.pdf"),
+            mime="application/pdf",
+            key=f"download_{item['name']}",
+        )
+    else:
+        st.info("📎 يوجد ملف SDS مرفق بهذه المادة — سيكون متاحًا للتحميل بعد اعتماد المسؤول.")
+
+import streamlit as st
+
+from common import inject_css, require_login, show_logo, sidebar_user_box
+
+st.set_page_config(page_title="لدغات الأفاعي والعقارب — CEHSMS", page_icon="🐍", layout="wide")
+inject_css()
+require_login()
+sidebar_user_box()
+show_logo(width=80)
+
+st.header("لدغات الأفاعي والعقارب — بروتوكولات الإسعاف والعلاج")
+tab_scorpion, tab_snake = st.tabs(["🦂 لدغة العقرب", "🐍 لدغة الثعبان"])
+
+with tab_scorpion:
+    st.subheader("الإسعافات الأولية")
+    st.markdown(
+        """
+1. طمأنة المصاب ومحاولة إبقائه هادئًا.
+2. إزالة الذنب إن وُجد باستخدام جسم مسطح مثل الكارت، وليس جسمًا حادًا، مع مراعاة
+   عدم استخدام ملقاط لأنه يتسبب في عصر مكان الإصابة وزيادة إفراز السم للدورة الدموية.
+3. غسل مكان الإصابة بالماء والصابون مع إزالة الخواتم والساعة والحلي من الطرف
+   المصاب لاحتمال تورّمه.
+4. يمكن استخدام رباط شاش أعلى مكان الإصابة مع مراعاة أن يُربط بخفة بحيث يغلق
+   الوريد فقط وليس الشريان.
+5. استخدام ثلج ملفوف بقماش على مكان الإصابة لمدة 10 دقائق ثم إزالته لمدة 10
+   دقائق أخرى مع التكرار.
+6. عدم استخدام أي مسكنات إلا بعد استشارة طبيب.
+7. تسجيل العلامات الحيوية للمصاب، خاصة النبض والتنفس وضغط الدم.
+        """
+    )
+
+    st.subheader("تقييم حالة المصاب والتعامل العلاجي")
+    scorpion_df = pd.DataFrame(
+        [
+            ["مستوى 0 — لا تأثير", "لا توجد أعراض أو علامات موضعية أو عامة", "لا يحتاج إلى علاج"],
+            ["مستوى 1 — قليلة التأثير",
+             "علامات موضعية: ألم، تنميل، خدر مكان اللدغة، برودة أطراف، هبوط ضغط",
+             "1–2 أمبولة مصل بالعضل/تحت الجلد بعد اختبار الحساسية، تكرار بعد 1–2 ساعة عند عدم التحسن"],
+            ["مستوى 2 — متوسط التأثير",
+             "أعراض المستوى 1 + تسرع/اختلال ضربات القلب + غثيان وقيء",
+             "5 أمبولات مخففة 1:10 بالتنقيط الوريدي على مدى 30 دقيقة"],
+            ["مستوى 3 — شديدة التأثير",
+             "أعراض المستوى 2 + خلل عصبي-عضلي بأي مكان بالجسم",
+             "نفس بروتوكول المستوى 2 مع دخول القسم الداخلي بالمستشفى"],
+        ],
+        columns=["المستوى", "الأعراض السريرية", "التعامل العلاجي"],
+    )
+    st.table(scorpion_df)
+
+    st.info(
+        "ملحوظات: تُزاد الجرعة عند الإصابة بالرأس/الرقبة/الكتف أو تأخر العلاج "
+        "(حتى 10 أمبولات) — يجب اختبار الحساسية الجلدية قبل إعطاء المصل — "
+        "يُحفظ المذيب بحرارة 2–8°م."
+    )
+    st.caption("المصدر: البروتوكول العلاجي للتعامل مع حالات لدغ العقرب — "
+                "lms.ehc.gov.eg/lms/mod/book/view.php?id=559&chapterid=3403")
+
+with tab_snake:
+    st.subheader("الإسعافات الأولية الفورية")
+    st.markdown(
+        """
+- **طمأنة المصاب:** الحفاظ على الهدوء يقلل سرعة انتشار السم.
+- **تثبيت الطرف المصاب:** وضعه أقل من مستوى القلب وتقليل حركته بجبيرة.
+- **إزالة الأشياء الضاغطة:** الخواتم والساعات والأحذية الضيقة قبل حدوث التورم.
+- **إزالة أي رباط ضاغط** رُبط سابقًا تدريجيًا وبحذر، دون ربط رباط جديد.
+- **تحديد وقت اللدغة بدقة** لتقييم شدة التسمم.
+- النقل الفوري لأقرب مستشفى مع متابعة العلامات الحيوية.
+        """
+    )
+
+    st.subheader("الأعراض الإكلينيكية")
+    c1, c2 = st.columns(2)
+    c1.write("**موضعيًا:** آثار الأنياب، ألم، تورم، فقاعات نزفية، تموّت نسيجي")
+    c2.write("**جهازيًا:** عامة، دموية، عصبية، قلبية-وعائية، بولية-تناسلية، عينية")
+
+    st.subheader("الفحوصات المطلوبة")
+    st.markdown(
+        """
+- صورة دم كاملة (C.B.C)
+- زمن النزف وP.T وP.T.T وI.N.R وFDPDs (مهمة في لدغة الأفعى)
+- وظائف الكلى (B.U.N والكرياتينين)
+- غازات الدم الشرياني ABGs (حيوية في لدغة الكوبرا)
+- إنزيمات الكبد والعضلات (كشف انحلال العضلات)
+- رسم قلب كهربائي ومتابعة مستمرة
+        """
+    )
+
+    st.subheader("العلاج")
+    st.markdown(
+        """
+- تثبيت الطرف والاهتمام بمجرى الهواء والتنفس والدورة الدموية (ABC)
+- مصل التيتانوس
+- مراقبة المريض 24 ساعة على الأقل
+- تسكين الألم بالباراسيتامول (وليس الأسبرين أو NSAIDs) أو ترامادول 50 مجم
+        """
+    )
+
+    st.subheader("الإجراءات النوعية (مصل مضاد السم) حسب درجة التسمم")
+    snake_df = pd.DataFrame(
+        [
+            ["لا يوجد تسمم (لدغة جافة)", "آثار أنياب دون رد فعل موضعي أو جهازي", "لا يوجد"],
+            ["خفيفة", "تورم وألم موضعي دون رد فعل جهازي", "1–3 أمبولات وريديًا بتخفيف 1:10"],
+            ["متوسطة", "تأثيرات موضعية واسعة أو جهازية خفيفة وتشوهات معملية خفيفة",
+             "3–5 أمبولات وريديًا بتخفيف 1:10"],
+            ["شديدة", "تأثيرات موضعية وجهازية واسعة وتشوهات معملية واضحة، قد تصل لـ 20 أمبولة",
+             "5–10 أمبولات وريديًا بتخفيف 1:10"],
+        ],
+        columns=["الدرجة", "الملامح", "الجرعة"],
+    )
+    st.table(snake_df)
+    st.caption("المصدر: وزارة الصحة والسكان المصرية — الإدارة المركزية للرعاية الحرجة والعاجلة")
+
+import streamlit as st
+
+from common import LOCATION_TEXT, TOX_MAIN_TEXT, inject_css, load_entries, require_login, show_logo, sidebar_user_box
+
+st.set_page_config(page_title="لوحة التحكم — CEHSMS", page_icon="📊", layout="wide")
+inject_css()
+require_login()
+sidebar_user_box()
+show_logo(width=80)
+
+if not st.session_state.get("is_owner"):
+    st.error("🔒 لوحة التحكم متاحة لمالك النظام فقط.")
+    st.stop()
+
+st.header("📊 لوحة التحكم")
+entries = load_entries()
+
+if entries.empty:
+    st.info("لا توجد بيانات كافية لعرض لوحة التحكم بعد.")
+    st.stop()
+
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("إجمالي الحالات", len(entries))
+c2.metric("إجمالي عدد المصابين", int(entries["casualty_count"].astype(float).sum()))
+c3.metric("تحتاج إزالة تلوث", int((entries["needs_decon"] == "yes").sum()))
+c4.metric("تحتاج فريق HAZMAT", int((entries["needs_hazmat_team"] == "yes").sum()))
+c5.metric("حالات حرجة", int((entries["severity"] == "critical").sum()))
+
+st.divider()
+
+col1, col2 = st.columns(2)
+with col1:
+    st.subheader("توزيع الحالات حسب درجة الخطورة")
+    st.bar_chart(entries["severity"].value_counts())
+
+    st.subheader("توزيع الحالات حسب مكان الإصابة")
+    loc_counts = entries["location"].map(lambda x: LOCATION_TEXT.get(x, x)).value_counts()
+    st.bar_chart(loc_counts)
+
+with col2:
+    st.subheader("توزيع الحالات حسب التصنيف السمي")
+    if "tox_class_main" in entries.columns:
+        tox_counts = entries["tox_class_main"].map(lambda x: TOX_MAIN_TEXT.get(x, x)).value_counts()
+        st.bar_chart(tox_counts)
+
+    st.subheader("أكثر المواد تكرارًا")
+    st.bar_chart(entries["material"].value_counts().head(10))
+EXT, SEVERITY_TEXT, TOX_MAIN_TEXT, TOX_SUB_OPTIONS,
+    add_new_material, build_mailto_link, inject_css, load_entries, load_sds_database_cached,
+    require_login, save_entries, sds_file_# -*- coding: utf-8 -*-
+"""صفحة: متابعة الحالة — سجل الحالات المسجّلة"""
+
+import streamlit as st
+
+from common import (
+    DECON_TEXT, HAZMAT_TEXT, LOCATION_TEXT, ROUTE_TEXT, SEVERITY_TEXT,
+    TOX_MAIN_TEXT, build_excel_bytes, inject_css, load_entries, require_login,
+    send_email_with_attachment, show_logo, sidebar_user_box, storage_backend,
+)
+
+st.set_page_config(page_title="متابعة الحالة — CEHSMS", page_icon="📋", layout="wide")
+inject_css()
+require_login()
+sidebar_user_box()
+
+show_logo(width=80)
+st.header("📋 متابعة الحالة — سجل الحالات المسجّلة")
+if storage_backend() == "local":
+    st.caption("💾 وضع التخزين الحالي: محلي (غير دائم على الاستضافة السحابية) — راجع إعدادات Google Sheets في README.")
+
+entries = load_entries()
+is_owner = st.session_state.get("is_owner", False)
+
+if entries.empty:
+    st.info("لا توجد حالات مسجّلة بعد.")
+    st.stop()
+
+for i, e in entries.iloc[::-1].iterrows():
+    sev = e.get("severity", "mild")
+    sev_class = {"mild": "sev-0", "moderate": "sev-1",
+                 "severe": "sev-2", "critical": "sev-3"}.get(sev, "sev-0")
+    with st.container(border=True):
+        st.markdown(
+            f'<span class="sev-badge {sev_class}">{SEVERITY_TEXT.get(sev, sev)}</span> '
+            f'&nbsp; <b>{e.get("time","")}</b> — المستشفى: {e.get("hospital_name","")} '
+            f'<span class="datetime-tag">📅 {e.get("incident_date","")} '
+            f'⏰ {e.get("incident_time","")}</span>',
+            unsafe_allow_html=True,
+        )
+        if is_owner:
+            st.write(
+                f"**{e.get('patient','')}** — {e.get('patient_gender','')} — "
+                f"العمر: {e.get('patient_age','')} — المهنة: {e.get('patient_profession','')}"
+            )
+        else:
+            st.markdown(
+                f"**حالة رقم {i+1}** — 🔒 بيانات المريض الشخصية محجوبة "
+                "(متاحة لمالك النظام فقط)"
+            )
+        st.write(
+            f"مكان الإصابة: {LOCATION_TEXT.get(e.get('location',''), e.get('location',''))}"
+            f" — عدد المصابين: {e.get('casualty_count','')}"
+        )
+        st.write(
+            f"المادة: {e.get('material','')} — طريقة الوصول: "
+            f"{ROUTE_TEXT.get(e.get('route',''), e.get('route',''))}"
+        )
+        tox_main_val = e.get('tox_class_main', '')
+        if tox_main_val:
+            st.write(f"التصنيف السمي: {TOX_MAIN_TEXT.get(tox_main_val, tox_main_val)} — {e.get('tox_class_sub','')}")
+        st.write(f"إزالة التلوث: {DECON_TEXT.get(e.get('needs_decon',''), '')} "
+                  f"— فريق HAZMAT: {HAZMAT_TEXT.get(e.get('needs_hazmat_team',''), '')}")
+        if is_owner:
+            if str(e.get("notes", "")).strip() and str(e.get("notes")) != "nan":
+                st.write(f"ملاحظات: {e.get('notes')}")
+            st.caption(f"المسجّل: {e.get('responder','')} — وقت التسجيل: {e.get('entry_datetime','')}")
+
+st.divider()
+
+if not is_owner:
+    st.markdown(
+        '<div class="locked-note">🔒 تصدير البيانات وإرسالها بالبريد متاح لمالك النظام فقط، '
+        'لأنها تحتوي على بيانات المرضى الحساسة.</div>',
+        unsafe_allow_html=True,
+    )
+    st.stop()
+
+# --------------------------------------------------------------------------
+# تصدير البيانات (مالك النظام فقط)
+# --------------------------------------------------------------------------
+st.subheader("📤 تصدير البيانات")
+
+excel_bytes = build_excel_bytes(entries)
+
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.download_button(
+        "⬇️ تحميل Excel", excel_bytes,
+        file_name="hazmat_report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+with c2:
+    st.download_button(
+        "⬇️ تحميل CSV", entries.to_csv(index=False).encode("utf-8-sig"),
+        file_name="hazmat_report.csv", mime="text/csv",
+        use_container_width=True,
+    )
+with c3:
+    st.download_button(
+        "⬇️ تحميل JSON",
+        entries.to_json(orient="records", force_ascii=False, indent=2).encode("utf-8"),
+        file_name="hazmat_report.json", mime="application/json",
+        use_container_width=True,
+    )
+
+st.divider()
+
+# --------------------------------------------------------------------------
+# إرسال التقرير بالبريد الإلكتروني (SMTP حقيقي)
+# --------------------------------------------------------------------------
+st.subheader("📧 إرسال التقرير بالبريد الإلكتروني")
+st.caption(
+    "الإرسال يتم مباشرة من خادم التطبيق عبر SMTP. بيانات الدخول لا تُحفظ على القرص، "
+    "وتبقى فقط طوال الجلسة الحالية."
+)
+
+with st.form("email_form"):
+    ec1, ec2 = st.columns(2)
+    with ec1:
+        smtp_host = st.text_input("خادم SMTP", value=st.session_state.get("smtp_host", "smtp.gmail.com"))
+        smtp_port = st.text_input("المنفذ (Port)", value=st.session_state.get("smtp_port", "587"))
+        sender_email = st.text_input("البريد المرسِل", value=st.session_state.get("sender_email", ""))
+    with ec2:
+        sender_password = st.text_input("كلمة مرور التطبيق (App Password)", type="password")
+        recipient_email = st.text_input("البريد المستلم *")
+        subject = st.text_input("عنوان الرسالة", value="تقرير حالات HAZMAT")
+
+    body_text = st.text_area("نص الرسالة", value="مرفق تقرير الحالات المسجّلة في نظام CEHSMS.")
+    send_btn = st.form_submit_button("📨 إرسال التقرير الآن (Excel مرفق)", use_container_width=True)
+
+if send_btn:
+    if not (smtp_host and smtp_port and sender_email and sender_password and recipient_email):
+        st.error("⚠ برجاء تعبئة كل بيانات إعدادات البريد والمستلم قبل الإرسال.")
+    else:
+        st.session_state["smtp_host"] = smtp_host
+        st.session_state["smtp_port"] = smtp_port
+        st.session_state["sender_email"] = sender_email
+        try:
+            send_email_with_attachment(
+                smtp_host, smtp_port, sender_email, sender_password, recipient_email,
+                subject, body_text, attachment_bytes=excel_bytes,
+                attachment_filename="hazmat_report.xlsx",
+            )
+            st.success(f"✅ تم إرسال التقرير بنجاح إلى {recipient_email}")
+        except Exception as e:
+            st.error(f"❌ فشل الإرسال: {e}")
+            st.info(
+                "تلميحات شائعة: لو بتستخدم Gmail لازم تفعّل 'App Passwords' من إعدادات الأمان "
+                "(مش كلمة مرور الحساب العادية)، وتأكد من صحة اسم الخادم والمنفذ."
+            )
+size_limit, show_logo, sidebar_user_box,
+    storage_backend,
+)
+
+st.set_page_config(page_title="بيانات الحالة — CEHSMS", page_icon="🧾", layout="wide")
+inject_css()
+require_login()
+sidebar_user_box()
+
+show_logo(width=80)
+st.header("🧾 بيانات الحالة")
+if storage_backend() == "local":
+    st.caption("💾 وضع التخزين الحالي: محلي (غير دائم على الاستضافة السحابية) — راجع إعدادات Google Sheets في README.")
+
+# إشعار نجاح إضافة مادة جديدة (من السايكل السابق) + رابط إخطار المالك بالبريد
+if st.session_state.get("material_added_notify"):
+    info = st.session_state.pop("material_added_notify")
+    st.success("✅ تمت إضافة المادة بنجاح — بانتظار اعتماد المسؤول.")
+    if info.get("email"):
+        link = build_mailto_link(info["email"], info["subject"], info["body"])
+        st.markdown(f"[📧 اضغط هنا لفتح بريدك وإرسال طلب الموافقة إلى {info['email']}]({link})")
+
+sds_db = load_sds_database_cached()
+material_names = [NO_MATERIAL_LABEL] + [m["name"] for m in sds_db] + [OTHER_MATERIAL_LABEL]
+
+# لو مادة جديدة اتضافت في السايكل اللي فات، نختارها تلقائيًا في القائمة
+# (لازم يحصل ده قبل إنشاء عنصر selectbox المرتبط بنفس الـ key)
+if "pending_new_material_name" in st.session_state:
+    pending_name = st.session_state.pop("pending_new_material_name")
+    if pending_name in material_names:
+        st.session_state["material_select"] = pending_name
+
+# ------------------------------------------------------------------------
+# اختيار التصنيف السمي والمادة *خارج* الفورم حتى تتحدث القوائم فورًا
+# ------------------------------------------------------------------------
+st.subheader("التصنيف السمي للمادة")
+tcol1, tcol2 = st.columns(2)
+with tcol1:
+    tox_main = st.selectbox(
+        "الفئة الرئيسية", list(TOX_MAIN_TEXT.keys()),
+        format_func=lambda k: TOX_MAIN_TEXT[k], key="tox_main_select",
+    )
+with tcol2:
+    tox_sub = st.selectbox(
+        "الفئة الفرعية", TOX_SUB_OPTIONS[tox_main], key="tox_sub_select_" + tox_main,
+    )
+
+st.subheader("المادة المشتبه بها")
+material_sel = st.selectbox("اختر من القائمة أو أضف مادة جديدة", material_names, key="material_select")
+
+if material_sel == OTHER_MATERIAL_LABEL:
+    st.info("مادة غير موجودة بالقاعدة — يمكنك إضافتها الآن، وستُحفظ بحالة **بانتظار اعتماد المسؤول**.")
+    with st.expander("➕ إضافة مادة جديدة", expanded=True):
+        nm_name = st.text_input("اسم المادة *", key="nm_name")
+        nm_trade = st.text_input("الاسم التجاري", key="nm_trade")
+        nm_cas = st.text_input("رقم CAS (إن وجد)", key="nm_cas")
+        nm_hazard = st.text_area("خطورة التعرض / التأثير الصحي", key="nm_hazard")
+        nm_storage = st.text_input("شروط التخزين", key="nm_storage")
+        nm_ppe = st.text_input("معدات الوقاية الشخصية اللازمة", key="nm_ppe")
+        nm_firstaid = st.text_area("الإسعافات الأولية", key="nm_firstaid")
+        st.caption(
+            f"📎 يمكن رفع ملف SDS الخاص بالمادة (PDF) — الحد الأقصى للحجم في وضع "
+            f"التخزين الحالي: {sds_file_size_limit() // 1000} كيلوبايت تقريبًا. "
+            f"الملف سيكون متاحًا للتحميل لباقي المستخدمين **بعد اعتماد المالك فقط**."
+        )
+        nm_sds_file = st.file_uploader("رفع ملف SDS (PDF) — اختياري", type=["pdf"], key="nm_sds_file")
+        owner_email = st.text_input(
+            "بريد مسؤول النظام لإخطاره بالإضافة (اختياري)", key="nm_owner_email",
+            placeholder="owner@hospital.com",
+        )
+        if st.button("💾 حفظ المادة الجديدة"):
+            if not nm_name.strip():
+                st.error("من فضلك اكتب اسم المادة أولًا.")
+            else:
+                sds_file_bytes = None
+                sds_file_name = None
+                if nm_sds_file is not None:
+                    file_bytes = nm_sds_file.getvalue()
+                    if len(file_bytes) > sds_file_size_limit():
+                        st.warning(
+                            f"⚠ حجم الملف ({len(file_bytes)//1000} كيلوبايت) أكبر من الحد "
+                            f"المسموح به ({sds_file_size_limit()//1000} كيلوبايت) في وضع "
+                            "التخزين الحالي. سيتم حفظ بيانات المادة بدون إرفاق الملف."
+                        )
+                    else:
+                        sds_file_bytes = file_bytes
+                        sds_file_name = nm_sds_file.name
+                item = add_new_material(
+                    sds_db, nm_name.strip(), nm_trade.strip(), nm_cas.strip(),
+                    tox_main, tox_sub, nm_firstaid.strip(), nm_hazard.strip(),
+                    nm_ppe.strip(), nm_storage.strip(),
+                    added_by=st.session_state.username,
+                    sds_file_bytes=sds_file_bytes, sds_file_name=sds_file_name,
+                )
+                # نخزّن اسم المادة الجديدة في session_state عشان تُختار تلقائيًا
+                # في القائمة بعد إعادة تشغيل الصفحة (rerun) — لازم كده عشان
+                # الحقول (زي material_select) بتتصفّر بعد كل تفاعل جديد
+                st.session_state["pending_new_material_name"] = item["name"]
+                notify = {"email": owner_email.strip()}
+                if owner_email.strip():
+                    body = (
+                        f"تمت إضافة مادة كيميائية جديدة تحتاج مراجعة واعتماد رسمي:\n\n"
+                        f"اسم المادة: {item['name']}\n"
+                        f"الاسم التجاري: {item['trade']}\n"
+                        f"رقم CAS: {item['cas']}\n"
+                        f"التصنيف: {TOX_MAIN_TEXT[tox_main]} — {tox_sub}\n"
+                        f"الإسعافات الأولية: {item['firstAid']}\n\n"
+                        f"تمت الإضافة بواسطة: {st.session_state.username}\n"
+                        f"التاريخ: {item['addedAt']}\n\n"
+                        f"برجاء مراجعة قاعدة بيانات SDS واعتماد إدراجها بشكل نهائي."
+                    )
+                    notify["subject"] = f"طلب موافقة على إضافة مادة كيميائية جديدة — {item['name']}"
+                    notify["body"] = body
+                st.session_state["material_added_notify"] = notify
+                st.rerun()
+# عرض ملخص المادة المختارة (لو مادة معروفة بالفعل)
+selected_item = None
+if material_sel not in (NO_MATERIAL_LABEL, OTHER_MATERIAL_LABEL):
+    selected_item = next((m for m in sds_db if m["name"] == material_sel), None)
+    if selected_item:
+        pending_badge = ' <span class="pending-tag">بانتظار الاعتماد</span>' if selected_item.get("pendingApproval") else ""
+        st.markdown(f"### ⚕ الإسعافات الأولية — {selected_item['name']}{pending_badge}", unsafe_allow_html=True)
+        if selected_item.get("skinDeconMandatory"):
+            st.markdown(
+                '<div class="decon-alert">🛑 إزالة التلوث إلزامية: طريقة وصول المادة عن طريق الجلد '
+                '— يجب غسل جيد بالماء وخلع الملابس الملوثة فورًا</div>',
+                unsafe_allow_html=True,
+            )
+        st.write(selected_item["firstAid"])
+        st.caption(
+            f"NFPA — الصحة: {selected_item['nfpa']['h']} · الاشتعال: {selected_item['nfpa']['f']} "
+            f"· التفاعلية: {selected_item['nfpa']['r']} · مهمات الوقاية: {selected_item['ppe']}"
+        )
+
+st.divider()
+
+# ------------------------------------------------------------------------
+# فورم بيانات الحالة (بدون خانة المادة/التصنيف، عشان دي بتتحدث فورًا برّه الفورم)
+# ------------------------------------------------------------------------
+with st.form("new_case_form", clear_on_submit=False):
+    c1, c2 = st.columns(2)
+    with c1:
+        hospital_name = st.text_input("اسم المستشفى *")
+        incident_date = st.date_input("📅 تاريخ الحادث", value=datetime.now().date())
+        incident_time = st.time_input("⏰ وقت الحادث", value=datetime.now().time())
+        patient = st.text_input("اسم المريض / الحالة *")
+        patient_gender = st.selectbox("النوع", ["ذكر", "أنثى"])
+        patient_age = st.number_input("العمر", min_value=0, max_value=120, step=1)
+        patient_profession = st.text_input("المهنة")
+    with c2:
+        location = st.selectbox(
+            "مكان الإصابة", list(LOCATION_TEXT.keys()),
+            format_func=lambda k: LOCATION_TEXT[k],
+        )
+        casualty_count = st.number_input("عدد المصابين", min_value=1, step=1, value=1)
+        route = st.selectbox(
+            "طريقة وصول المادة *", list(ROUTE_TEXT.keys()),
+            format_func=lambda k: ROUTE_TEXT[k],
+        )
+        severity = st.selectbox(
+            "درجة الخطورة", list(SEVERITY_TEXT.keys()),
+            format_func=lambda k: SEVERITY_TEXT[k],
+        )
+
+    notes = st.text_area("الوصف / الأعراض / الإجراء المتخذ")
+
+    c3, c4 = st.columns(2)
+    with c3:
+        needs_decon = st.selectbox(
+            "الحاجة لإزالة التلوث (Decontamination)",
+            list(DECON_TEXT.keys()), format_func=lambda k: DECON_TEXT[k],
+        )
+    with c4:
+        needs_hazmat_team = st.selectbox(
+            "الحاجة لتفعيل فريق HAZMAT",
+            list(HAZMAT_TEXT.keys()), format_func=lambda k: HAZMAT_TEXT[k],
+        )
+
+    submitted = st.form_submit_button("➕ تسجيل الحالة", use_container_width=True)
+
+if submitted:
+    missing = []
+    if not hospital_name.strip():
+        missing.append("اسم المستشفى")
+    if not patient.strip():
+        missing.append("اسم المريض")
+    if material_sel in (NO_MATERIAL_LABEL, OTHER_MATERIAL_LABEL):
+        missing.append("اسم المادة (اختر مادة من القائمة، أو أضف مادة جديدة واحفظها أولًا)")
+
+    if missing:
+        st.error("⚠ برجاء تعبئة الحقول الإلزامية التالية: " + "، ".join(missing))
+    else:
+        material_name_final = material_sel
+        item = selected_item
+        first_aid = item["firstAid"] if item else ""
+        sds_ref = item["cas"] if item else "-"
+
+        entries = load_entries()
+        new_row = {
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "hospital_name": hospital_name,
+            "incident_date": str(incident_date),
+            "incident_time": incident_time.strftime("%H:%M"),
+            "patient": patient,
+            "patient_gender": patient_gender,
+            "patient_age": patient_age,
+            "patient_profession": patient_profession,
+            "location": location,
+            "casualty_count": casualty_count,
+            "material": material_name_final,
+            "tox_class_main": tox_main,
+            "tox_class_sub": tox_sub,
+            "route": route,
+            "severity": severity,
+            "sds": sds_ref,
+            "first_aid": first_aid,
+            "needs_decon": needs_decon,
+            "needs_hazmat_team": needs_hazmat_team,
+            "notes": notes,
+            "responder": st.session_state.username,
+            "entry_datetime": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        entries = pd.concat([entries, pd.DataFrame([new_row])], ignore_index=True)
+        save_entries(entries)
+        st.success("تم تسجيل الحالة بنجاح ✅")
+        st.balloons()
