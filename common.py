@@ -94,21 +94,123 @@ def show_logo(width=90):
 
 
 def inject_css():
-    """يحقن تنسيق RTL + الأنماط المخصّصة (الشارات والتنبيهات).
+    """يحقن تنسيق احترافي: خط عربي واضح + محاذاة يمين صحيحة لكل عناصر
+    الفورم + هوية بصرية متناسقة مع لوجو CEHSMS + الأنماط المخصّصة (الشارات والتنبيهات).
     ‼️ لازم تتنادى من أول كل صفحة (بما فيها app.py) — Streamlit بيشغّل كل صفحة
     في pages/ كسكريبت مستقل تمامًا، ومفيش وراثة تلقائية للـ CSS من app.py."""
     st.markdown(
         """
         <style>
-        html, body, [class*="css"]  { direction: rtl; text-align: right; }
-        .stApp { background-color: #ffffff; }
-        section[data-testid="stSidebar"] { direction: rtl; text-align: right; }
+        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap');
+
+        /* ===== الخط والاتجاه العام ===== */
+        html, body, [class*="css"], .stApp, .stMarkdown, p, span, div, label,
+        input, textarea, select, button {
+            font-family: 'Tajawal', 'Segoe UI', Tahoma, sans-serif !important;
+        }
+        html, body { direction: rtl; }
+        .stApp { background-color: #f7f9fb; }
+
+        /* المحتوى الأساسي: نص وعناوين لليمين */
+        [data-testid="stAppViewContainer"] .block-container {
+            direction: rtl;
+            text-align: right;
+        }
+        h1, h2, h3, h4, h5, h6 { text-align: right !important; }
+        [data-testid="stMarkdownContainer"] { text-align: right; }
+        [data-testid="stMarkdownContainer"] p { text-align: right; }
+
+        /* ===== محاذاة عناوين الحقول (Labels) لليمين فعليًا ===== */
+        [data-testid="stWidgetLabel"] {
+            direction: rtl;
+            justify-content: flex-end !important;
+            text-align: right !important;
+            width: 100%;
+        }
+        [data-testid="stWidgetLabel"] > label { width: 100%; text-align: right; }
+        [data-testid="stWidgetLabel"] p { text-align: right; width: 100%; font-weight: 600; color:#1e2a3a; }
+
+        /* ===== محاذاة محتوى الحقول نفسها ===== */
+        .stTextInput input, .stTextArea textarea, .stNumberInput input,
+        .stDateInput input, .stTimeInput input {
+            direction: rtl;
+            text-align: right !important;
+        }
+        div[data-baseweb="select"] * { direction: rtl; text-align: right !important; }
+        div[data-baseweb="select"] > div { justify-content: flex-end; }
+        [data-testid="stFileUploaderDropzone"] { direction: rtl; text-align: right; }
+
+        /* ===== شكل الحقول: حواف ناعمة وحدود واضحة ===== */
+        .stTextInput input, .stTextArea textarea, .stNumberInput input,
+        .stDateInput input, .stTimeInput input, div[data-baseweb="select"] > div {
+            border-radius: 8px !important;
+            border: 1px solid #d3dae3 !important;
+            background-color: #ffffff !important;
+        }
+        .stTextInput input:focus, .stTextArea textarea:focus, .stNumberInput input:focus {
+            border-color: #1e3a5f !important;
+            box-shadow: 0 0 0 2px rgba(30,58,95,.15) !important;
+        }
+
+        /* ===== الأزرار ===== */
+        .stButton button, .stFormSubmitButton button, .stDownloadButton button {
+            border-radius: 8px !important;
+            font-weight: 700 !important;
+            padding: .55rem 1.4rem !important;
+            transition: all .15s ease-in-out;
+        }
+        .stButton button[kind="primary"], .stFormSubmitButton button[kind="primary"] {
+            background-color: #1e3a5f !important;
+            border-color: #1e3a5f !important;
+        }
+        .stButton button[kind="primary"]:hover, .stFormSubmitButton button[kind="primary"]:hover {
+            background-color: #16293f !important;
+            transform: translateY(-1px);
+        }
+
+        /* ===== العناوين الرئيسية بشكل أوضح ===== */
+        h1 { font-weight: 900 !important; color: #1e3a5f !important; font-size: 2rem !important; }
+        h2 { font-weight: 700 !important; color: #1e3a5f !important; border-bottom: 3px solid #1e3a5f; padding-bottom: 8px; }
+        h3 { font-weight: 700 !important; color: #2c4a6e !important; }
+
+        /* ===== القائمة الجانبية ===== */
+        section[data-testid="stSidebar"] {
+            direction: rtl;
+            text-align: right;
+            background-color: #16293f;
+        }
+        section[data-testid="stSidebar"] * { color: #eef2f7 !important; }
+        section[data-testid="stSidebar"] [data-testid="stPageLink"] {
+            border-radius: 8px;
+            margin-bottom: 2px;
+        }
+        section[data-testid="stSidebar"] [data-testid="stPageLink"]:hover {
+            background-color: rgba(255,255,255,.08);
+        }
+        section[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.15); }
+        section[data-testid="stSidebar"] .stButton button {
+            background-color: rgba(255,255,255,.08) !important;
+            border: 1px solid rgba(255,255,255,.2) !important;
+            color: #fff !important;
+            width: 100%;
+        }
+
+        /* ===== الحاويات (Containers) بشكل بطاقات احترافية ===== */
+        [data-testid="stContainer"] [data-testid="stVerticalBlockBorderWrapper"] {
+            border-radius: 12px !important;
+            box-shadow: 0 1px 4px rgba(30,58,95,.08);
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"] > div {
+            border-radius: 12px;
+        }
+
+        /* ===== شارات وتنبيهات الحالة (كما كانت) ===== */
         .decon-alert{
             background: rgba(194,54,22,.1);
             border: 2px solid #c23616;
             color: #c23616;
             font-weight:700;
-            border-radius:6px;
+            border-radius:8px;
             padding:10px 14px;
             margin: 8px 0;
         }
@@ -119,7 +221,7 @@ def inject_css():
             font-weight:700;
             font-size:.75rem;
             padding:3px 9px;
-            border-radius:4px;
+            border-radius:6px;
             margin-bottom:6px;
         }
         .pending-tag{
@@ -129,20 +231,20 @@ def inject_css():
             font-weight:700;
             font-size:.72rem;
             padding:3px 9px;
-            border-radius:4px;
+            border-radius:6px;
             margin-inline-start:6px;
         }
         .locked-note{
             background: rgba(184,121,10,.1);
             border:1px solid #b8790a;
-            border-radius:6px;
+            border-radius:8px;
             padding:10px 14px;
             font-size:.9rem;
         }
         .sev-badge{
             display:inline-block;
             padding:3px 12px;
-            border-radius:4px;
+            border-radius:6px;
             font-size:.8rem;
             font-weight:700;
             color:#fff;
@@ -153,7 +255,7 @@ def inject_css():
             color:#334;
             font-size:.78rem;
             padding:3px 10px;
-            border-radius:4px;
+            border-radius:6px;
             margin-inline-start:6px;
         }
         .sev-0{ background:#2e8b57; }
@@ -482,3 +584,4 @@ def sidebar_user_box():
             for k in ["logged_in", "username", "role", "is_owner"]:
                 st.session_state.pop(k, None)
             st.switch_page("app.py")
+
