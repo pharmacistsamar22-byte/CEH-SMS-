@@ -43,7 +43,38 @@ if "pending_new_material_name" in st.session_state:
         st.session_state["material_select"] = pending_name
 
 # ------------------------------------------------------------------------
-# اختيار التصنيف السمي والمادة *خارج* الفورم حتى تتحدث القوائم فورًا
+# 1) بيانات المستشفى والمريض — أول حاجة في الصفحة
+# ------------------------------------------------------------------------
+st.subheader("🏥 بيانات المستشفى والمريض")
+pcol1, pcol2 = st.columns(2)
+with pcol1:
+    hospital_name = st.text_input("اسم المستشفى *", key="hospital_name")
+    patient = st.text_input("اسم المريض / الحالة *", key="patient")
+    patient_gender = st.selectbox("النوع", ["ذكر", "أنثى"], key="patient_gender")
+with pcol2:
+    incident_date = st.date_input("📅 تاريخ الحادث", value=datetime.now().date(), key="incident_date")
+    incident_time = st.time_input("⏰ وقت الحادث", value=datetime.now().time(), key="incident_time")
+    patient_age = st.number_input("العمر", min_value=0, max_value=120, step=1, key="patient_age")
+    patient_profession = st.text_input("المهنة", key="patient_profession")
+
+st.divider()
+
+# ------------------------------------------------------------------------
+# 2) مكان الإصابة وعدد المصابين
+# ------------------------------------------------------------------------
+lcol1, lcol2 = st.columns(2)
+with lcol1:
+    location = st.selectbox(
+        "مكان الإصابة", list(LOCATION_TEXT.keys()),
+        format_func=lambda k: LOCATION_TEXT[k], key="location",
+    )
+with lcol2:
+    casualty_count = st.number_input("عدد المصابين", min_value=1, step=1, value=1, key="casualty_count")
+
+st.divider()
+
+# ------------------------------------------------------------------------
+# 3) التصنيف السمي والمادة المشتبه بها
 # ------------------------------------------------------------------------
 st.subheader("التصنيف السمي للمادة")
 tcol1, tcol2 = st.columns(2)
@@ -147,28 +178,19 @@ if material_sel not in (NO_MATERIAL_LABEL, OTHER_MATERIAL_LABEL):
 st.divider()
 
 # ------------------------------------------------------------------------
-# فورم بيانات الحالة (بدون خانة المادة/التصنيف، عشان دي بتتحدث فورًا برّه الفورم)
+# فورم بيانات الحالة الإضافية (طريقة الوصول، الخطورة، الملاحظات...)
+# ملحوظة: اسم المستشفى/المريض/مكان الإصابة/المادة اتجمعوا فوق برّه الفورم
+# عشان يتحدثوا فورًا (مثلاً القائمة الفرعية بتتغير مع الفئة الرئيسية) —
+# فمفيش داعي (ولا يصح) نكررهم تاني هنا جوه الفورم.
 # ------------------------------------------------------------------------
 with st.form("new_case_form", clear_on_submit=False):
     c1, c2 = st.columns(2)
     with c1:
-        hospital_name = st.text_input("اسم المستشفى *")
-        incident_date = st.date_input("📅 تاريخ الحادث", value=datetime.now().date())
-        incident_time = st.time_input("⏰ وقت الحادث", value=datetime.now().time())
-        patient = st.text_input("اسم المريض / الحالة *")
-        patient_gender = st.selectbox("النوع", ["ذكر", "أنثى"])
-        patient_age = st.number_input("العمر", min_value=0, max_value=120, step=1)
-        patient_profession = st.text_input("المهنة")
-    with c2:
-        location = st.selectbox(
-            "مكان الإصابة", list(LOCATION_TEXT.keys()),
-            format_func=lambda k: LOCATION_TEXT[k],
-        )
-        casualty_count = st.number_input("عدد المصابين", min_value=1, step=1, value=1)
         route = st.selectbox(
             "طريقة وصول المادة *", list(ROUTE_TEXT.keys()),
             format_func=lambda k: ROUTE_TEXT[k],
         )
+    with c2:
         severity = st.selectbox(
             "درجة الخطورة", list(SEVERITY_TEXT.keys()),
             format_func=lambda k: SEVERITY_TEXT[k],
@@ -236,3 +258,4 @@ if submitted:
         save_entries(entries)
         st.success("تم تسجيل الحالة بنجاح ✅")
         st.balloons()
+
